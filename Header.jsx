@@ -16,6 +16,14 @@ export default function Header() {
     : undefined;
   return (
     <>
+      <a className="annonce" href="/#services">
+        <span className="an-dot" />
+        <span className="an-new">Nouveau</span>
+        <span className="an-txt">Vous gérez seul votre bien ? État des lieux dès 3 €/m², mise en location dès 8 €/m²</span>
+        <span className="an-txt-s">Services à la carte, dès 3 €/m²</span>
+        <span className="an-cta">Découvrir →</span>
+        <span className="an-shine" />
+      </a>
       <header className="nav">
         <div className="wrap">
           <Link className="brand" href="/">
@@ -25,6 +33,7 @@ export default function Header() {
             <Link href="/gestion-locative-douai">Gestion locative</Link>
             <Link href="/investisseurs">Investisseurs</Link>
             <Link href="/conciergerie-sejour">Conciergerie</Link>
+            <a href="/#services">Services</a>
             <Link href="/changer-agence">Changer d&apos;agence</Link>
             <a href="#faq">FAQ</a>
             <a href="#contact">Contact</a>
