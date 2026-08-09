@@ -1,6 +1,7 @@
 import Head from "next/head";
 import Header from "../Header";
 import Footer from "../Footer";
+import ContactForm from "../ContactForm";
 import body from "../investisseurs";
 
 export default function Page() {
@@ -13,6 +14,7 @@ export default function Page() {
       </Head>
       <Header />
       <main dangerouslySetInnerHTML={{ __html: body }} />
+      <ContactForm />
       <Footer />
     </>
   );
