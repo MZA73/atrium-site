@@ -1,12 +1,10 @@
-// ATRIUM  Route serveur de capture des leads (M1)
+// ATRIUM  Route serveur de capture des leads (M1) - version resiliente
 // Le formulaire public N'ECRIT JAMAIS en direct dans la base : il passe par ici.
-// On se connecte a Postgres avec une connexion privilegiee (pooler Supabase),
-// ce qui contourne la RLS cote serveur, exactement comme prevu par le blueprint.
-// Puis on notifie par email via Brevo. Aucun secret n'atteint le navigateur.
+// Connexion Postgres privilegiee (pooler Supabase) => contourne la RLS cote
+// serveur, comme prevu. Puis notification Brevo. Aucun secret cote navigateur.
 
 import { Pool } from "pg";
 
-// Un seul pool reutilise entre invocations (Vercel garde la fonction chaude).
 let pool;
 function db() {
   if (!pool) {
@@ -14,6 +12,7 @@ function db() {
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
       max: 2,
+      connectionTimeoutMillis: 8000,
     });
   }
   return pool;
@@ -25,7 +24,7 @@ async function notifierBrevo(lead) {
   const key = process.env.BREVO_API_KEY;
   const sender = process.env.BREVO_SENDER_EMAIL;
   const to = process.env.CONTACT_NOTIFY_TO;
-  if (!key || !sender || !to) return; // notification best effort
+  if (!key || !sender || !to) return;
   const html = `
     <h2>Nouveau contact ATRIUM</h2>
     <p><b>Profil :</b> ${lead.interet || "non precise"}</p>
@@ -45,19 +44,30 @@ async function notifierBrevo(lead) {
       subject: `Nouveau contact ATRIUM : ${lead.nom}${lead.ville_bien ? " (" + lead.ville_bien + ")" : ""}`,
       htmlContent: html,
     }),
-  }).catch(() => {}); // ne jamais bloquer la reponse sur l'email
+  }).catch(() => {});
 }
 
 export default async function handler(req, res) {
+  // Diagnostic sur (booleens uniquement, aucune valeur secrete exposee)
+  if (req.method === "GET") {
+    return res.status(200).json({
+      ok: true,
+      config: {
+        db: !!process.env.DATABASE_URL,
+        brevoKey: !!process.env.BREVO_API_KEY,
+        sender: !!process.env.BREVO_SENDER_EMAIL,
+        notify: !!process.env.CONTACT_NOTIFY_TO,
+      },
+    });
+  }
+
   if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
+    res.setHeader("Allow", "POST, GET");
     return res.status(405).json({ ok: false, error: "method_not_allowed" });
   }
 
   const b = req.body || {};
-
-  // Anti-spam : champ piege invisible. Un robot le remplit, un humain jamais.
-  if (b.website) return res.status(200).json({ ok: true }); // on fait semblant d'accepter
+  if (b.website) return res.status(200).json({ ok: true }); // honeypot
 
   const nom = (b.nom || "").toString().trim().slice(0, 120);
   const email = (b.email || "").toString().trim().slice(0, 160);
@@ -70,26 +80,29 @@ export default async function handler(req, res) {
   if (!nom || !isEmail(email)) return res.status(400).json({ ok: false, error: "champs_invalides" });
   if (!consent) return res.status(400).json({ ok: false, error: "consentement_requis" });
 
-  const client = await db().connect();
+  let client;
   try {
-    await client.query("begin");
-    const c = await client.query(
-      `insert into contacts (kind, nom, email, telephone, ville)
-       values ('personne', $1, $2, $3, $4) returning id`,
-      [nom, email, telephone || null, ville_bien || null]
-    );
-    const contactId = c.rows[0].id;
-    await client.query(
-      `insert into prospect_profiles (contact_id, source, interet, ville_bien, message, statut, consentement_at)
-       values ($1, 'site-formulaire', $2, $3, $4, 'nouveau', now())`,
-      [contactId, interet, ville_bien || null, message || null]
-    );
-    await client.query("commit");
+    client = await db().connect();
+    try {
+      await client.query("begin");
+      const c = await client.query(
+        `insert into contacts (kind, nom, email, telephone, ville)
+         values ('personne', $1, $2, $3, $4) returning id`,
+        [nom, email, telephone || null, ville_bien || null]
+      );
+      const contactId = c.rows[0].id;
+      await client.query(
+        `insert into prospect_profiles (contact_id, source, interet, ville_bien, message, statut, consentement_at)
+         values ($1, 'site-formulaire', $2, $3, $4, 'nouveau', now())`,
+        [contactId, interet, ville_bien || null, message || null]
+      );
+      await client.query("commit");
+    } finally {
+      client.release();
+    }
   } catch (e) {
-    await client.query("rollback").catch(() => {});
-    return res.status(500).json({ ok: false, error: "enregistrement_impossible" });
-  } finally {
-    client.release();
+    // On ne renvoie QUE le code technique (sans message ni chaine de connexion)
+    return res.status(500).json({ ok: false, error: "db", code: e && e.code ? String(e.code) : "unknown" });
   }
 
   await notifierBrevo({ nom, email, telephone, ville_bien, message, interet });
