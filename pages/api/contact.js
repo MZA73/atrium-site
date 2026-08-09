@@ -2,18 +2,30 @@
 // Le formulaire public N'ECRIT JAMAIS en direct dans la base : il passe par ici.
 // Connexion Postgres privilegiee (pooler Supabase) => contourne la RLS cote
 // serveur, comme prevu. Puis notification Brevo. Aucun secret cote navigateur.
+//
+// Le mot de passe est lu BRUT dans DB_PASSWORD (jamais melange a l'URL), ce qui
+// evite tout probleme d'encodage de caracteres speciaux. L'hote, l'utilisateur,
+// le port et la base sont extraits de DATABASE_URL sans dependre du mot de passe.
 
 import { Pool } from "pg";
 
 let pool;
 function db() {
   if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      max: 2,
-      connectionTimeoutMillis: 8000,
-    });
+    const url = process.env.DATABASE_URL || "";
+    // Capture user / host / port / db meme si le mot de passe contient @ : / etc.
+    const m = url.match(/^postgres(?:ql)?:\/\/([^:]+):.*@([^:\/]+):(\d+)\/([^?]+)/);
+    const cfg = { ssl: { rejectUnauthorized: false }, max: 2, connectionTimeoutMillis: 8000 };
+    if (m && process.env.DB_PASSWORD) {
+      cfg.user = m[1];
+      cfg.host = m[2];
+      cfg.port = Number(m[3]);
+      cfg.database = m[4];
+      cfg.password = process.env.DB_PASSWORD;
+    } else {
+      cfg.connectionString = url; // repli
+    }
+    pool = new Pool(cfg);
   }
   return pool;
 }
@@ -48,12 +60,12 @@ async function notifierBrevo(lead) {
 }
 
 export default async function handler(req, res) {
-  // Diagnostic sur (booleens uniquement, aucune valeur secrete exposee)
   if (req.method === "GET") {
     return res.status(200).json({
       ok: true,
       config: {
         db: !!process.env.DATABASE_URL,
+        dbPassword: !!process.env.DB_PASSWORD,
         brevoKey: !!process.env.BREVO_API_KEY,
         sender: !!process.env.BREVO_SENDER_EMAIL,
         notify: !!process.env.CONTACT_NOTIFY_TO,
@@ -101,7 +113,6 @@ export default async function handler(req, res) {
       client.release();
     }
   } catch (e) {
-    // On ne renvoie QUE le code technique (sans message ni chaine de connexion)
     return res.status(500).json({ ok: false, error: "db", code: e && e.code ? String(e.code) : "unknown" });
   }
 
