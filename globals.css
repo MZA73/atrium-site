@@ -174,7 +174,7 @@ section{padding:82px 0;}
 .estim p{font-size:19px; color:#c1b89f; max-width:620px; margin:0 auto 30px;}
 
 /* avis */
-.avis-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:22px;}
+.avis-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:22px;}
 .avis{background:#fff; border:1px solid var(--filet); border-radius:5px; padding:28px;}
 .avis .stars{color:var(--or); letter-spacing:3px; margin-bottom:12px;}
 .avis p{font-family:'Cormorant Garamond',serif; font-size:19px; font-style:italic; color:#3a362d; margin-bottom:16px;}
