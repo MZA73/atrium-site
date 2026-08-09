@@ -106,7 +106,11 @@ export default function ContactForm() {
               <input name="consent" type="checkbox" required />
               <span>
                 J'accepte que mes donnees soient utilisees pour etre recontacte au sujet de ma demande,
-                conformement a la politique de confidentialite. Elles ne sont jamais cedees.
+                conformement a la{" "}
+                <a href="/politique-confidentialite" target="_blank" rel="noopener noreferrer" style={{ color: "#c9a961" }}>
+                  politique de confidentialite
+                </a>
+                . Elles ne sont jamais cedees.
               </span>
             </label>
 
