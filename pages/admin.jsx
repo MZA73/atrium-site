@@ -405,7 +405,7 @@ export default function Admin() {
           <div className="app">
             <header className="top">
               <div className="brand sm">ATRIUM<span>Cockpit</span></div>
-              <div className="who">{session?.email}<button className="ghost" onClick={onLogout}>Déconnexion</button></div>
+              <div className="who"><a className="navlink" href="/gestion">Gestion →</a>{session?.email}<button className="ghost" onClick={onLogout}>Déconnexion</button></div>
             </header>
 
             {err && <div className="banner-err">{err}</div>}
@@ -557,6 +557,7 @@ export default function Admin() {
         .top { display: flex; align-items: center; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid rgba(201,169,97,.2); margin-bottom: 24px; flex-wrap: wrap; gap: 10px; }
         .who { color: #a99f8b; font-size: 14px; display: flex; align-items: center; gap: 14px; }
         .ghost { background: transparent; border: 1px solid rgba(201,169,97,.4); color: ${OR}; border-radius: 8px; padding: 8px 14px; font-family: inherit; font-size: 13px; cursor: pointer; }
+        .navlink { color: ${OR}; text-decoration: none; font-size: 14px; }
         .banner-err { background: rgba(180,60,50,.16); border: 1px solid rgba(200,90,80,.5); color: #f0c9c3; padding: 10px 14px; border-radius: 8px; margin-bottom: 18px; }
         .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 30px; }
         .kpi { background: #141414; border: 1px solid rgba(201,169,97,.2); border-radius: 12px; padding: 18px 16px; }
