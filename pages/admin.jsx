@@ -8,8 +8,8 @@ import { useEffect, useState, useCallback } from "react";
   (has_role('admin')). La cle ci-dessous est la cle PUBLIABLE, concue pour
   vivre dans le navigateur.
 
-  Connexion : email + mot de passe, PUIS MFA TOTP obligatoire (Google
-  Authenticator / Authy). Enrolement au 1er acces, code a 6 chiffres ensuite.
+  Connexion SANS mot de passe : l'admin saisit son email, recoit un code a
+  6 chiffres par email (OTP Supabase), et le saisit pour entrer.
   Pipeline : les prospects se deplacent d'une etape a l'autre ; chaque
   mouvement est journalise dans "activities".
 */
@@ -28,20 +28,15 @@ const PIPELINE = [
   { key: "mandat_signe", label: "Mandat signé" },
 ];
 const LABEL = {
-  nouveau: "Nouveau",
-  contacte: "Contacté",
-  rendez_vous: "Rendez-vous",
-  mandat_signe: "Mandat signé",
-  perdu: "Perdu",
+  nouveau: "Nouveau", contacte: "Contacté", rendez_vous: "Rendez-vous",
+  mandat_signe: "Mandat signé", perdu: "Perdu",
 };
 
-// ---- dates (ISO) ----
 const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString(); };
 const startOfWeek = () => { const d = new Date(); const j = (d.getDay()+6)%7; d.setDate(d.getDate()-j); d.setHours(0,0,0,0); return d.toISOString(); };
 const startOfMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d.toISOString(); };
 const todayDate = () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); };
 
-// ---- session ----
 function loadSession() {
   if (typeof window === "undefined") return null;
   try { return JSON.parse(window.localStorage.getItem(STORE) || "null"); } catch { return null; }
@@ -58,15 +53,15 @@ function decodeJwt(t) {
 
 export default function Admin() {
   const [session, setSession] = useState(null);
-  const [phase, setPhase] = useState("boot"); // boot|login|mfa_enroll|mfa_challenge|denied|ready
+  const [phase, setPhase] = useState("boot"); // boot|email|otp|denied|ready
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
+  const [pendingEmail, setPendingEmail] = useState("");
   const [kpis, setKpis] = useState(null);
   const [prospects, setProspects] = useState([]);
   const [appUserId, setAppUserId] = useState(null);
-  const [mfa, setMfa] = useState(null); // {factorId, qr, secret} en enrolement, {factorId} en challenge
 
-  // ---- token valide (refresh si besoin) ----
   const validToken = useCallback(async (s) => {
     if (!s) return null;
     const now = Math.floor(Date.now() / 1000);
@@ -81,14 +76,13 @@ export default function Admin() {
     const ns = {
       access_token: j.access_token,
       refresh_token: j.refresh_token,
-      expires_at: j.expires_at || Math.floor(Date.now() / 1000) + (j.expires_in || 3600),
+      expires_at: j.expires_at || Math.floor(Date.now()/1000) + (j.expires_in || 3600),
       email: s.email,
     };
     saveSession(ns); setSession(ns);
     return ns.access_token;
   }, []);
 
-  // ---- REST /rest/v1 ----
   const rest = useCallback(async (pathQ, s, { method = "GET", body, count, prefer } = {}) => {
     const token = await validToken(s);
     if (!token) throw new Error("session_expiree");
@@ -96,9 +90,7 @@ export default function Admin() {
     if (body) headers["content-type"] = "application/json";
     if (count) headers.Prefer = "count=exact";
     if (prefer) headers.Prefer = prefer;
-    const r = await fetch(`${SB_URL}/rest/v1/${pathQ}`, {
-      method, headers, body: body ? JSON.stringify(body) : undefined,
-    });
+    const r = await fetch(`${SB_URL}/rest/v1/${pathQ}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
     if (r.status === 401) throw new Error("session_expiree");
     if (count) {
       const cr = r.headers.get("content-range") || "*/0";
@@ -121,25 +113,6 @@ export default function Admin() {
     return r.json();
   }, [validToken]);
 
-  // ---- Auth /auth/v1 (avec token) ----
-  const auth = useCallback(async (path, s, { method = "POST", body } = {}) => {
-    const token = await validToken(s);
-    const r = await fetch(`${SB_URL}/auth/v1/${path}`, {
-      method,
-      headers: {
-        apikey: SB_KEY,
-        Authorization: `Bearer ${token}`,
-        ...(body ? { "content-type": "application/json" } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const txt = await r.text();
-    const j = txt ? JSON.parse(txt) : {};
-    if (!r.ok) throw new Error(j.error_description || j.msg || j.message || "auth_error");
-    return j;
-  }, [validToken]);
-
-  // ---- data ----
   const loadData = useCallback(async (s) => {
     const c = (q) => rest(q, s, { count: true });
     const today = startOfToday(), week = startOfWeek(), month = startOfMonth().slice(0,10), td = todayDate();
@@ -171,20 +144,17 @@ export default function Admin() {
     setProspects(Array.isArray(list) ? list : []);
   }, [rest]);
 
-  // ---- apres auth : admin + MFA ----
   const proceed = useCallback(async (s) => {
-    setErr("");
+    setErr(""); setInfo("");
     let token;
     try { token = await validToken(s); } catch { token = null; }
-    if (!token) { clearStore(); setSession(null); setPhase("login"); return; }
+    if (!token) { clearStore(); setSession(null); setPhase("email"); return; }
 
-    // role admin
     let admin;
     try { admin = await rpc("has_role", { r: "admin" }, s); }
-    catch { setErr("Erreur de vérification du rôle."); setPhase("login"); return; }
+    catch { setErr("Erreur de vérification du rôle."); setPhase("email"); return; }
     if (admin !== true) { setPhase("denied"); return; }
 
-    // app_user id (pour journalisation)
     try {
       const sub = decodeJwt(token).sub;
       if (sub) {
@@ -193,75 +163,68 @@ export default function Admin() {
       }
     } catch {}
 
-    // MFA
-    let user;
-    try { user = await auth("user", s, { method: "GET" }); }
-    catch { setErr("Erreur de chargement du profil."); setPhase("login"); return; }
-    const factors = (user.factors || []).filter((f) => f.factor_type === "totp");
-    const verified = factors.find((f) => f.status === "verified");
-    const aal = decodeJwt(token).aal;
-
-    if (verified) {
-      if (aal === "aal2") { await loadData(s); setPhase("ready"); return; }
-      setMfa({ factorId: verified.id });
-      setPhase("mfa_challenge");
-      return;
+    try { await loadData(s); setPhase("ready"); }
+    catch (e) {
+      if (String(e.message).includes("session")) { clearStore(); setSession(null); setPhase("email"); }
+      else { setErr("Erreur de chargement. Réessayez."); setPhase("ready"); }
     }
-    // pas de facteur verifie -> enrolement obligatoire
-    await startEnroll(s, factors);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [validToken, rpc, rest, auth, loadData]);
+  }, [validToken, rpc, rest, loadData]);
 
-  const startEnroll = useCallback(async (s, existing) => {
-    setErr("");
-    try {
-      // nettoie d'eventuels facteurs non verifies restes en attente
-      for (const f of (existing || [])) {
-        if (f.status !== "verified") {
-          try { await auth(`factors/${f.id}`, s, { method: "DELETE" }); } catch {}
-        }
-      }
-      const res = await auth("factors", s, {
-        method: "POST",
-        body: { factor_type: "totp", friendly_name: "ATRIUM Admin" },
-      });
-      setMfa({ factorId: res.id, qr: res.totp?.qr_code, secret: res.totp?.secret });
-      setPhase("mfa_enroll");
-    } catch (e) {
-      setErr("Impossible de préparer la double authentification. Réessayez.");
-      setPhase("login");
-    }
-  }, [auth]);
-
-  // ---- boot ----
   useEffect(() => {
     const s = loadSession();
     if (s && s.refresh_token) { setSession(s); proceed(s); }
-    else setPhase("login");
+    else setPhase("email");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- login mot de passe ----
-  async function onLogin(e) {
+  // Etape 1 : demander l'envoi du code par email
+  async function onRequestCode(e) {
     e.preventDefault();
-    setBusy(true); setErr("");
-    const f = e.currentTarget;
+    setBusy(true); setErr(""); setInfo("");
+    const email = (e.currentTarget.email.value || "").trim().toLowerCase();
     try {
-      const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+      const r = await fetch(`${SB_URL}/auth/v1/otp`, {
         method: "POST",
         headers: { "content-type": "application/json", apikey: SB_KEY },
-        body: JSON.stringify({ email: f.email.value, password: f.password.value }),
+        body: JSON.stringify({ email, create_user: false }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setErr(
+          r.status === 429
+            ? "Trop de demandes. Patientez une minute avant de réessayer."
+            : (j.error_description || j.msg || "Impossible d'envoyer le code. Vérifiez l'email.")
+        );
+        setBusy(false); return;
+      }
+      setPendingEmail(email);
+      setInfo("Un code à 6 chiffres vient d'être envoyé à " + email + ".");
+      setPhase("otp");
+    } catch { setErr("Connexion impossible. Vérifiez votre réseau."); }
+    setBusy(false);
+  }
+
+  // Etape 2 : verifier le code
+  async function onVerifyCode(e) {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    const code = (e.currentTarget.code.value || "").replace(/\s/g, "");
+    try {
+      const r = await fetch(`${SB_URL}/auth/v1/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: SB_KEY },
+        body: JSON.stringify({ email: pendingEmail, token: code, type: "email" }),
       });
       const j = await r.json();
       if (!r.ok || !j.access_token) {
-        setErr(j.error_description || j.msg || "Identifiants invalides.");
+        setErr("Code incorrect ou expiré. Redemandez un code si besoin.");
         setBusy(false); return;
       }
       const s = {
         access_token: j.access_token,
         refresh_token: j.refresh_token,
         expires_at: j.expires_at || Math.floor(Date.now()/1000) + (j.expires_in || 3600),
-        email: f.email.value,
+        email: pendingEmail,
       };
       saveSession(s); setSession(s); setPhase("boot");
       await proceed(s);
@@ -269,36 +232,23 @@ export default function Admin() {
     setBusy(false);
   }
 
-  // ---- verification code MFA (enrolement ou challenge) ----
-  async function onMfaSubmit(e) {
-    e.preventDefault();
-    if (!mfa?.factorId || !session) return;
-    setBusy(true); setErr("");
-    const code = e.currentTarget.code.value.replace(/\s/g, "");
+  async function onResend() {
+    if (!pendingEmail) return;
+    setBusy(true); setErr(""); setInfo("");
     try {
-      const ch = await auth(`factors/${mfa.factorId}/challenge`, session, { method: "POST" });
-      const res = await auth(`factors/${mfa.factorId}/verify`, session, {
-        method: "POST", body: { challenge_id: ch.id, code },
+      const r = await fetch(`${SB_URL}/auth/v1/otp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: SB_KEY },
+        body: JSON.stringify({ email: pendingEmail, create_user: false }),
       });
-      if (!res.access_token) throw new Error("code_invalide");
-      const s = {
-        access_token: res.access_token,
-        refresh_token: res.refresh_token,
-        expires_at: res.expires_at || Math.floor(Date.now()/1000) + (res.expires_in || 3600),
-        email: session.email,
-      };
-      saveSession(s); setSession(s);
-      // marque mfa_enabled (best effort)
-      try {
-        const sub = decodeJwt(s.access_token).sub;
-        if (sub) await rest(`app_users?auth_user_id=eq.${sub}`, s, { method: "PATCH", body: { mfa_enabled: true }, prefer: "return=minimal" });
-      } catch {}
-      setMfa(null); setPhase("boot");
-      await loadData(s); setPhase("ready");
-    } catch (e) {
-      setErr("Code incorrect ou expiré. Réessayez avec le code affiché dans votre application.");
-    }
+      if (r.ok) setInfo("Nouveau code envoyé à " + pendingEmail + ".");
+      else setErr(r.status === 429 ? "Trop de demandes. Patientez une minute." : "Envoi impossible, réessayez.");
+    } catch { setErr("Réseau indisponible."); }
     setBusy(false);
+  }
+
+  function backToEmail() {
+    setPhase("email"); setErr(""); setInfo(""); setPendingEmail("");
   }
 
   async function onLogout() {
@@ -306,10 +256,9 @@ export default function Admin() {
       const token = session && (await validToken(session));
       if (token) await fetch(`${SB_URL}/auth/v1/logout`, { method: "POST", headers: { apikey: SB_KEY, Authorization: `Bearer ${token}` } });
     } catch {}
-    clearStore(); setSession(null); setKpis(null); setProspects([]); setMfa(null); setPhase("login");
+    clearStore(); setSession(null); setKpis(null); setProspects([]); setPendingEmail(""); setPhase("email");
   }
 
-  // ---- deplacement pipeline ----
   async function changeStatut(p, newS) {
     const id = p.contact_id, oldS = p.statut;
     if (oldS === newS) return;
@@ -352,51 +301,37 @@ export default function Admin() {
           <div className="center"><div className="spin" /><p>Ouverture du cockpit…</p></div>
         )}
 
-        {phase === "login" && (
+        {phase === "email" && (
           <div className="center">
-            <form className="card" onSubmit={onLogin}>
+            <form className="card" onSubmit={onRequestCode}>
               <div className="brand">ATRIUM<span>Administration</span></div>
+              <p className="mfa-txt">Entrez votre email : vous recevrez un code à 6 chiffres pour vous connecter.</p>
               <label>Email
-                <input name="email" type="email" required placeholder="vous@templeimmo.com" autoComplete="username" />
-              </label>
-              <label>Mot de passe
-                <input name="password" type="password" required placeholder="••••••••" autoComplete="current-password" />
+                <input name="email" type="email" required placeholder="vous@templeimmo.com" autoComplete="username" autoFocus />
               </label>
               {err && <div className="err">{err}</div>}
-              <button type="submit" disabled={busy}>{busy ? "Connexion…" : "Continuer"}</button>
-              <p className="hint">Accès réservé à l'administration du cabinet · double authentification requise.</p>
+              <button type="submit" disabled={busy}>{busy ? "Envoi du code…" : "Recevoir mon code"}</button>
+              <p className="hint">Accès réservé à l'administration du cabinet.</p>
             </form>
           </div>
         )}
 
-        {phase === "mfa_enroll" && (
+        {phase === "otp" && (
           <div className="center">
-            <form className="card" onSubmit={onMfaSubmit}>
-              <div className="brand">ATRIUM<span>Sécurité</span></div>
-              <p className="mfa-txt">Activez la double authentification. Scannez ce QR code avec <b>Google Authenticator</b> ou <b>Authy</b>, puis saisissez le code à 6 chiffres.</p>
-              {mfa?.qr && <div className="qr"><img src={mfa.qr} alt="QR code MFA" /></div>}
-              {mfa?.secret && <div className="secret">Clé manuelle : <code>{mfa.secret}</code></div>}
-              <label>Code à 6 chiffres
-                <input name="code" inputMode="numeric" pattern="[0-9 ]*" maxLength={7} required placeholder="123456" autoComplete="one-time-code" />
-              </label>
-              {err && <div className="err">{err}</div>}
-              <button type="submit" disabled={busy}>{busy ? "Vérification…" : "Activer et entrer"}</button>
-              <p className="hint"><a onClick={onLogout} className="link">Annuler</a></p>
-            </form>
-          </div>
-        )}
-
-        {phase === "mfa_challenge" && (
-          <div className="center">
-            <form className="card" onSubmit={onMfaSubmit}>
+            <form className="card" onSubmit={onVerifyCode}>
               <div className="brand">ATRIUM<span>Vérification</span></div>
-              <p className="mfa-txt">Saisissez le code à 6 chiffres affiché dans votre application d'authentification.</p>
+              {info && <div className="info">{info}</div>}
+              <p className="mfa-txt">Saisissez le code à 6 chiffres reçu par email. Pensez à vérifier les spams.</p>
               <label>Code à 6 chiffres
-                <input name="code" inputMode="numeric" pattern="[0-9 ]*" maxLength={7} required placeholder="123456" autoComplete="one-time-code" autoFocus />
+                <input name="code" inputMode="numeric" pattern="[0-9 ]*" maxLength={8} required placeholder="123456" autoComplete="one-time-code" autoFocus />
               </label>
               {err && <div className="err">{err}</div>}
               <button type="submit" disabled={busy}>{busy ? "Vérification…" : "Entrer dans le cockpit"}</button>
-              <p className="hint"><a onClick={onLogout} className="link">Se déconnecter</a></p>
+              <p className="hint">
+                <a className="link" onClick={onResend}>Renvoyer le code</a>
+                {"  ·  "}
+                <a className="link" onClick={backToEmail}>Changer d'email</a>
+              </p>
             </form>
           </div>
         )}
@@ -406,7 +341,7 @@ export default function Admin() {
             <div className="card">
               <div className="brand">ATRIUM<span>Administration</span></div>
               <p className="denied">Ce compte n'a pas le rôle administrateur.<br />Contactez le responsable pour obtenir l'accès.</p>
-              <button onClick={onLogout}>Se déconnecter</button>
+              <button onClick={onLogout}>Retour</button>
             </div>
           </div>
         )}
@@ -515,10 +450,7 @@ export default function Admin() {
         .denied { color: #cfc6b2; font-size: 15px; margin-bottom: 20px; }
         .link { color: ${OR}; cursor: pointer; text-decoration: underline; }
         .mfa-txt { color: #cfc6b2; font-size: 14px; line-height: 1.6; margin: 0 0 18px; }
-        .qr { background: #fff; border-radius: 12px; padding: 12px; width: 200px; margin: 0 auto 14px; }
-        .qr img { display: block; width: 100%; height: auto; }
-        .secret { color: #9a917d; font-size: 12.5px; text-align: center; margin-bottom: 16px; word-break: break-all; }
-        .secret code { color: ${OR}; }
+        .info { background: rgba(201,169,97,.12); border: 1px solid rgba(201,169,97,.4); color: #e7d9b4; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
         .err { background: rgba(180,60,50,.16); border: 1px solid rgba(200,90,80,.5); color: #f0c9c3; padding: 10px 12px; border-radius: 8px; font-size: 13.5px; margin-bottom: 14px; }
         .app { max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; }
         .top { display: flex; align-items: center; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid rgba(201,169,97,.2); margin-bottom: 24px; flex-wrap: wrap; gap: 10px; }
