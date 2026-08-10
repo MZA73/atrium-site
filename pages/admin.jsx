@@ -31,6 +31,8 @@ const LABEL = {
   nouveau: "Nouveau", contacte: "Contacté", rendez_vous: "Rendez-vous",
   mandat_signe: "Mandat signé", perdu: "Perdu",
 };
+const INC_STATUT = { nouveau: "Nouveau", en_cours: "En cours", resolu: "Résolu", annule: "Annulé" };
+const nomOf = (c) => c ? (c.raison_sociale || [c.prenom, c.nom].filter(Boolean).join(" ") || c.email || "Contact") : "Contact";
 
 const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString(); };
 const startOfWeek = () => { const d = new Date(); const j = (d.getDay()+6)%7; d.setDate(d.getDate()-j); d.setHours(0,0,0,0); return d.toISOString(); };
@@ -65,6 +67,8 @@ export default function Admin() {
   const [bauxList, setBauxList] = useState([]);
   const [upMsg, setUpMsg] = useState("");
   const [upBusy, setUpBusy] = useState(false);
+  const [incidents, setIncidents] = useState([]);
+  const [convos, setConvos] = useState([]);
 
   const validToken = useCallback(async (s) => {
     if (!s) return null;
@@ -154,6 +158,20 @@ export default function Admin() {
       ]);
       setBiensList(Array.isArray(bl) ? bl : []);
       setBauxList(Array.isArray(bxl) ? bxl : []);
+    } catch {}
+    try {
+      const inc = await rest(`incidents?select=id,sujet,description,statut,created_at,contacts(nom,prenom,raison_sociale)&order=created_at.desc&limit=80`, s);
+      setIncidents(Array.isArray(inc) ? inc : []);
+    } catch {}
+    try {
+      const msgs = await rest(`messages?select=id,from_user_id,to_contact_id,body,created_at,contacts(nom,prenom,raison_sociale)&order=created_at.asc&limit=300`, s);
+      const map = {};
+      (Array.isArray(msgs) ? msgs : []).forEach((m) => {
+        const k = m.to_contact_id;
+        if (!map[k]) map[k] = { contact_id: k, name: nomOf(m.contacts), items: [] };
+        map[k].items.push(m);
+      });
+      setConvos(Object.values(map));
     } catch {}
   }, [rest]);
 
@@ -335,6 +353,24 @@ export default function Admin() {
     setUpBusy(false);
   }
 
+  async function setIncidentStatut(inc, statut) {
+    setIncidents((arr) => arr.map((x) => x.id === inc.id ? { ...x, statut } : x));
+    try { await rest(`incidents?id=eq.${inc.id}`, session, { method: "PATCH", body: { statut }, prefer: "return=minimal" }); }
+    catch { setErr("Mise à jour du statut impossible."); loadData(session).catch(() => {}); }
+  }
+
+  async function reply(e, contactId) {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const body = (f.body.value || "").trim();
+    if (!body || !appUserId) return;
+    setErr("");
+    try {
+      await rest(`messages`, session, { method: "POST", prefer: "return=minimal", body: { from_user_id: appUserId, to_contact_id: contactId, body } });
+      f.reset(); loadData(session).catch(() => {});
+    } catch { setErr("Envoi impossible."); }
+  }
+
   const nomContact = (c) => {
     if (!c) return "Contact";
     if (c.raison_sociale) return c.raison_sociale;
@@ -463,6 +499,49 @@ export default function Admin() {
                   </div>
                 );
               })}
+            </section>
+
+            <section className="inc-admin">
+              <h2 className="docs-h">Incidents signalés</h2>
+              {incidents.length === 0 ? <div className="a-empty">Aucun incident signalé.</div> : (
+                <div className="ilist">
+                  {incidents.map((i) => (
+                    <div className="irow" key={i.id}>
+                      <div className="imain">
+                        <div className="isujet">{i.sujet} <span className="iby">— {nomOf(i.contacts)}</span></div>
+                        {i.description && <div className="idesc">{i.description}</div>}
+                      </div>
+                      <div className="iact">
+                        <span className={`pill ${i.statut === "resolu" ? "ok" : "warn"}`}>{INC_STATUT[i.statut] || i.statut}</span>
+                        <select value={i.statut} onChange={(e) => setIncidentStatut(i, e.target.value)}>
+                          <option value="nouveau">Nouveau</option>
+                          <option value="en_cours">En cours</option>
+                          <option value="resolu">Résolu</option>
+                          <option value="annule">Annulé</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="msg-admin">
+              <h2 className="docs-h">Messages clients</h2>
+              {convos.length === 0 ? <div className="a-empty">Aucun message.</div> : convos.map((c) => (
+                <div className="convo" key={c.contact_id}>
+                  <div className="cname">{c.name}</div>
+                  <div className="cmsgs">
+                    {c.items.map((m) => (
+                      <div className={`cb ${m.from_user_id === appUserId ? "me" : "them"}`} key={m.id}>{m.body}</div>
+                    ))}
+                  </div>
+                  <form className="creply" onSubmit={(e) => reply(e, c.contact_id)}>
+                    <input name="body" placeholder="Répondre…" required />
+                    <button type="submit">Répondre</button>
+                  </form>
+                </div>
+              ))}
             </section>
 
             <section className="docs-admin">
@@ -602,6 +681,27 @@ export default function Admin() {
         .upform button:disabled { opacity: .6; }
         .upmsg { color: #c9a961; font-size: 14px; margin-bottom: 12px; }
         .uphint { color: #8f8674; font-size: 12.5px; margin: 12px 0 0; }
+        .inc-admin, .msg-admin { margin-top: 34px; border-top: 1px solid rgba(201,169,97,.14); padding-top: 20px; }
+        .a-empty { color: #8f8674; font-size: 14px; }
+        .ilist { display: flex; flex-direction: column; gap: 8px; }
+        .irow { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; background: #141414; border: 1px solid rgba(201,169,97,.2); border-radius: 10px; padding: 13px 16px; }
+        .isujet { color: #f3efe6; font-size: 15px; font-weight: 600; }
+        .iby { color: #8f8674; font-weight: 400; font-size: 13px; }
+        .idesc { color: #a99f8b; font-size: 13px; margin-top: 3px; }
+        .iact { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        .iact select { background: #0d0d0d; border: 1px solid rgba(201,169,97,.35); color: #f3efe6; border-radius: 7px; padding: 6px 8px; font-family: inherit; font-size: 13px; }
+        .pill { font-size: 11px; padding: 2px 10px; border-radius: 20px; white-space: nowrap; }
+        .pill.ok { background: rgba(80,160,80,.18); color: #8fce8f; }
+        .pill.warn { background: rgba(200,150,60,.18); color: #e0b972; }
+        .convo { background: #141414; border: 1px solid rgba(201,169,97,.2); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
+        .cname { font-family: "Cinzel", serif; color: ${OR}; font-size: 14px; margin-bottom: 8px; }
+        .cmsgs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+        .cb { max-width: 80%; padding: 8px 12px; border-radius: 10px; font-size: 14px; }
+        .cb.them { align-self: flex-start; background: #1e1e1e; color: #e7ddc7; }
+        .cb.me { align-self: flex-end; background: linear-gradient(180deg,#d8bd7e,#c9a961); color: #0d0d0d; }
+        .creply { display: flex; gap: 8px; }
+        .creply input { flex: 1; background: #0d0d0d; border: 1px solid rgba(201,169,97,.35); color: #f3efe6; border-radius: 8px; padding: 9px 12px; font-family: inherit; font-size: 14px; }
+        .creply button { background: linear-gradient(180deg,#d8bd7e,#c9a961); color: #0d0d0d; border: none; border-radius: 8px; padding: 9px 16px; font-weight: 700; font-family: inherit; cursor: pointer; }
         @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } .board, .lostcards { grid-template-columns: 1fr 1fr; } }
         @media (max-width: 560px) { .board, .lostcards { grid-template-columns: 1fr; } }
       `}</style>

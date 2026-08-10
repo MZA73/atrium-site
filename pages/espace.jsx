@@ -27,6 +27,7 @@ const STATUT_MANDAT = { projet: "Projet", actif: "Actif", resilie: "Résilié", 
 const SIGN = { aucune: "Non signé", en_cours: "Signature en cours", signe: "Signé" };
 const STATUT_BAIL = { projet: "Projet", actif: "En cours", termine: "Terminé", resilie: "Résilié" };
 const TYPE_MANDAT = { gestion: "Gestion locative", recherche_locataire: "Recherche de locataire" };
+const INC_STATUT = { nouveau: "Nouveau", en_cours: "En cours", resolu: "Résolu", annule: "Annulé" };
 
 function loadSession() {
   if (typeof window === "undefined") return null;
@@ -57,6 +58,9 @@ export default function Espace() {
   const [bailLoc, setBailLoc] = useState([]);
   const [docs, setDocs] = useState([]);
   const [appUserId, setAppUserId] = useState(null);
+  const [contactId, setContactId] = useState(null);
+  const [incidents, setIncidents] = useState([]);
+  const [messages, setMessages] = useState([]);
 
   const validToken = useCallback(async (s) => {
     if (!s) return null;
@@ -74,13 +78,15 @@ export default function Espace() {
     return ns.access_token;
   }, []);
 
-  const rest = useCallback(async (pathQ, s) => {
+  const rest = useCallback(async (pathQ, s, { method = "GET", body, prefer } = {}) => {
     const token = await validToken(s);
     if (!token) throw new Error("session_expiree");
-    const r = await fetch(`${SB_URL}/rest/v1/${pathQ}`, {
-      headers: { apikey: SB_KEY, Authorization: `Bearer ${token}` },
-    });
+    const headers = { apikey: SB_KEY, Authorization: `Bearer ${token}` };
+    if (body) headers["content-type"] = "application/json";
+    if (prefer) headers.Prefer = prefer;
+    const r = await fetch(`${SB_URL}/rest/v1/${pathQ}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
     if (r.status === 401) throw new Error("session_expiree");
+    if (r.status === 204) return null;
     const txt = await r.text();
     return txt ? JSON.parse(txt) : null;
   }, [validToken]);
@@ -118,6 +124,14 @@ export default function Espace() {
       const d = await rest(`documents?select=id,type,created_at,expires_at,visibility,storage_path&order=created_at.desc&limit=100`, s);
       setDocs(Array.isArray(d) ? d : []);
     } catch {}
+    try {
+      const inc = await rest(`incidents?select=id,sujet,description,statut,created_at&order=created_at.desc&limit=50`, s);
+      setIncidents(Array.isArray(inc) ? inc : []);
+    } catch {}
+    try {
+      const msgs = await rest(`messages?select=id,from_user_id,to_contact_id,body,created_at&order=created_at.asc&limit=100`, s);
+      setMessages(Array.isArray(msgs) ? msgs : []);
+    } catch {}
   }, [rest]);
 
   const proceed = useCallback(async (s) => {
@@ -136,8 +150,8 @@ export default function Espace() {
     try {
       const sub = decodeJwt(token).sub;
       if (sub) {
-        const rows = await rest(`app_users?select=id&auth_user_id=eq.${sub}&limit=1`, s);
-        if (Array.isArray(rows) && rows[0]) setAppUserId(rows[0].id);
+        const rows = await rest(`app_users?select=id,contact_id&auth_user_id=eq.${sub}&limit=1`, s);
+        if (Array.isArray(rows) && rows[0]) { setAppUserId(rows[0].id); setContactId(rows[0].contact_id); }
       }
     } catch {}
     try { await loadData(s, isB, isL); setPhase("ready"); }
@@ -237,6 +251,37 @@ export default function Espace() {
       } catch {}
       window.open(`${SB_URL}/storage/v1${j.signedURL}`, "_blank", "noopener");
     } catch { setErr("Téléchargement impossible. Réessayez."); }
+  }
+
+  async function submitIncident(e) {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const sujet = (f.sujet.value || "").trim();
+    if (!sujet || !contactId) return;
+    setErr("");
+    try {
+      await rest(`incidents`, session, { method: "POST", prefer: "return=minimal", body: {
+        contact_id: contactId, sujet, description: (f.description.value || "").trim() || null,
+        bail_id: (bailLoc[0] && bailLoc[0].id) || null,
+      }});
+      f.reset();
+      const inc = await rest(`incidents?select=id,sujet,description,statut,created_at&order=created_at.desc&limit=50`, session);
+      setIncidents(Array.isArray(inc) ? inc : []);
+    } catch { setErr("Envoi du signalement impossible."); }
+  }
+
+  async function sendMessage(e) {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const body = (f.body.value || "").trim();
+    if (!body || !appUserId || !contactId) return;
+    setErr("");
+    try {
+      await rest(`messages`, session, { method: "POST", prefer: "return=minimal", body: { from_user_id: appUserId, to_contact_id: contactId, body } });
+      f.reset();
+      const msgs = await rest(`messages?select=id,from_user_id,to_contact_id,body,created_at&order=created_at.asc&limit=100`, session);
+      setMessages(Array.isArray(msgs) ? msgs : []);
+    } catch { setErr("Envoi du message impossible."); }
   }
 
   const nomLoc = (parties) => {
@@ -387,6 +432,42 @@ export default function Espace() {
               </div>
             )}
 
+            <section className="panel echanges">
+              <h1>Échanges avec le cabinet</h1>
+
+              <h2>Signaler un problème</h2>
+              <form className="inc-form" onSubmit={submitIncident}>
+                <input name="sujet" placeholder="Sujet (ex : fuite, chauffage, serrure…)" required />
+                <textarea name="description" rows={2} placeholder="Décrivez le problème en quelques mots…" />
+                <button type="submit">Envoyer le signalement</button>
+              </form>
+              {incidents.length > 0 && (
+                <div className="inc-list">
+                  {incidents.map((i) => (
+                    <div className="inc-row" key={i.id}>
+                      <div><div className="inc-sujet">{i.sujet}</div>{i.description && <div className="inc-desc">{i.description}</div>}</div>
+                      <span className={`pill ${i.statut === "resolu" ? "ok" : "warn"}`}>{INC_STATUT[i.statut] || i.statut}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <h2>Messagerie</h2>
+              <div className="thread">
+                {messages.length === 0 ? <div className="empty">Aucun message pour le moment. Écrivez au cabinet ci-dessous.</div> :
+                  messages.map((m) => (
+                    <div className={`bubble ${m.from_user_id === appUserId ? "me" : "them"}`} key={m.id}>
+                      <div className="btxt">{m.body}</div>
+                      <div className="bmeta">{m.from_user_id === appUserId ? "Vous" : "Le cabinet"} · {m.created_at ? new Date(m.created_at).toLocaleDateString("fr-FR") : ""}</div>
+                    </div>
+                  ))}
+              </div>
+              <form className="msg-form" onSubmit={sendMessage}>
+                <input name="body" placeholder="Votre message au cabinet…" required />
+                <button type="submit">Envoyer</button>
+              </form>
+            </section>
+
             <p className="foot">ATRIUM by Le Temple de l&apos;Immobilier · 03 27 95 61 14 · contact@templeimmo.com</p>
           </div>
         )}
@@ -442,6 +523,21 @@ export default function Espace() {
         .det span { display: block; color: #8a8069; font-size: 12.5px; margin-bottom: 4px; }
         .det b { color: #0d0d0d; font-size: 18px; }
         .empty { color: #a49a82; background: #fbf9f2; border: 1px dashed #e0d6bf; border-radius: 10px; padding: 16px; font-size: 14px; }
+        .echanges { margin-top: 40px; border-top: 1px solid #e6ddca; padding-top: 22px; }
+        .inc-form, .msg-form { display: flex; flex-direction: column; gap: 10px; max-width: 560px; margin-bottom: 14px; }
+        .msg-form { flex-direction: row; }
+        .inc-form input, .inc-form textarea, .msg-form input { background: #fffdf8; border: 1px solid #d9cfb6; border-radius: 9px; padding: 11px 13px; color: #2a2620; font-size: 15px; font-family: inherit; width: 100%; }
+        .inc-form button, .msg-form button { background: linear-gradient(180deg,#c9a961,${OR}); color: #221c0c; border: none; border-radius: 9px; padding: 11px 18px; font-weight: 700; font-family: inherit; cursor: pointer; align-self: flex-start; }
+        .msg-form button { align-self: auto; white-space: nowrap; }
+        .inc-list { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin-bottom: 8px; }
+        .inc-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; background: #fffdf8; border: 1px solid #e6ddca; border-radius: 9px; padding: 12px 14px; }
+        .inc-sujet { color: #0d0d0d; font-size: 15px; font-weight: 600; }
+        .inc-desc { color: #6b6350; font-size: 13px; margin-top: 3px; }
+        .thread { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin-bottom: 12px; }
+        .bubble { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14.5px; line-height: 1.5; }
+        .bubble.me { align-self: flex-end; background: #0d0d0d; color: #f3efe6; }
+        .bubble.them { align-self: flex-start; background: #fffdf8; border: 1px solid #e6ddca; color: #2a2620; }
+        .bmeta { font-size: 11px; opacity: .7; margin-top: 4px; }
         .foot { text-align: center; color: #a49a82; font-size: 12.5px; margin-top: 40px; }
         @media (max-width: 560px) { .panel h1 { font-size: 22px; } }
       `}</style>
