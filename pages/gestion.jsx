@@ -35,6 +35,7 @@ export default function Gestion() {
   const [biens, setBiens] = useState([]);
   const [mandats, setMandats] = useState([]);
   const [baux, setBaux] = useState([]);
+  const [invites, setInvites] = useState([]);
   const [msg, setMsg] = useState({});
 
   const validToken = useCallback(async (s) => {
@@ -88,6 +89,7 @@ export default function Gestion() {
     setBiens(Array.isArray(b) ? b : []);
     setMandats(Array.isArray(m) ? m : []);
     setBaux(Array.isArray(bx) ? bx : []);
+    try { const inv = await api(`portal_invites?select=email,roles,invited_at&order=invited_at.desc`, s); setInvites(Array.isArray(inv) ? inv : []); } catch {}
   }, [api]);
 
   const proceed = useCallback(async (s) => {
@@ -196,6 +198,21 @@ export default function Gestion() {
     } catch (er) { flash("bail", "Échec : " + er.message); }
   }
 
+  async function createInvite(e) {
+    e.preventDefault(); const f = e.currentTarget; flash("invite", "");
+    const email = (f.contact.value || "").trim().toLowerCase();
+    const roles = [];
+    if (f.bailleur.checked) roles.push("bailleur");
+    if (f.locataire.checked) roles.push("locataire");
+    if (!email) { flash("invite", "Choisissez un contact disposant d'un email."); return; }
+    if (roles.length === 0) { flash("invite", "Cochez au moins un rôle."); return; }
+    try {
+      await api(`portal_invites`, session, { method: "POST", prefer: "resolution=merge-duplicates,return=minimal", body: { email, roles } });
+      flash("invite", `Invitation enregistrée pour ${email}. Le client accède à son espace en saisissant cet email sur atrium.templeimmo.com/espace.`);
+      f.reset(); await refresh(session);
+    } catch (er) { flash("invite", "Échec : " + er.message); }
+  }
+
   const contactOpts = contacts.map((c) => <option key={c.id} value={c.id}>{nomContact(c)}{c.email ? ` — ${c.email}` : ""}</option>);
   const bienOpts = biens.map((b) => <option key={b.id} value={b.id}>{b.adresse}</option>);
 
@@ -240,6 +257,26 @@ export default function Gestion() {
               <div className="who"><a className="navlink" href="/admin">← Cockpit</a>{session?.email}<button className="ghost" onClick={onLogout}>Déconnexion</button></div>
             </header>
             {err && <div className="banner-err">{err}</div>}
+
+            <section className="invite-block">
+              <h2>Inviter un client au portail</h2>
+              <p className="invite-lead">Le client accède à son espace en saisissant simplement son email — son accès et son rôle sont créés automatiquement à sa première connexion. (Créez d'abord son contact avec son email ci-dessous.)</p>
+              <form className="invite-form" onSubmit={createInvite}>
+                <label>Contact
+                  <select name="contact" defaultValue="">
+                    <option value="" disabled>Choisir un contact…</option>
+                    {contacts.filter((c) => c.email).map((c) => <option key={c.id} value={c.email}>{nomContact(c)} — {c.email}</option>)}
+                  </select>
+                </label>
+                <div className="roles">
+                  <label className="chk"><input type="checkbox" name="bailleur" /> Propriétaire</label>
+                  <label className="chk"><input type="checkbox" name="locataire" /> Locataire</label>
+                </div>
+                <button type="submit">Inviter au portail</button>
+              </form>
+              {msg.invite && <div className="fmsg">{msg.invite}</div>}
+              {invites.length > 0 && <div className="mini">En attente de 1re connexion : {invites.map((i) => `${i.email} (${(i.roles || []).join(", ")})`).join(" · ")}</div>}
+            </section>
 
             <div className="cols">
               {/* CONTACT */}
@@ -379,6 +416,16 @@ export default function Gestion() {
         .navlink { color: ${OR}; text-decoration: none; }
         .ghost { background: transparent; border: 1px solid rgba(201,169,97,.4); color: ${OR}; border-radius: 8px; padding: 7px 13px; font-family: inherit; font-size: 13px; cursor: pointer; }
         .banner-err { background: rgba(180,60,50,.16); border: 1px solid rgba(200,90,80,.5); color: #f0c9c3; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; }
+        .invite-block { background: #17130a; border: 1px solid rgba(201,169,97,.35); border-radius: 14px; padding: 22px; margin-bottom: 20px; }
+        .invite-block h2 { font-family: "Cinzel", serif; color: #fff; font-size: 18px; margin: 0 0 8px; }
+        .invite-lead { color: #b7ae98; font-size: 13.5px; line-height: 1.6; margin: 0 0 16px; }
+        .invite-form { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+        .invite-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: #cfc6b2; flex: 1 1 280px; }
+        .invite-form select { background: ${NOIR}; border: 1px solid rgba(201,169,97,.3); border-radius: 8px; padding: 10px 12px; color: #f3efe6; font-family: inherit; font-size: 14px; }
+        .roles { display: flex; gap: 18px; align-items: center; }
+        .chk { flex-direction: row !important; align-items: center; gap: 7px; color: #d8d0bf; font-size: 14px; }
+        .chk input { width: 17px; height: 17px; accent-color: ${OR}; }
+        .invite-form button { background: linear-gradient(180deg,#d8bd7e,${OR}); color: ${NOIR}; border: none; border-radius: 8px; padding: 11px 20px; font-weight: 700; font-family: inherit; cursor: pointer; }
         .cols { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
         .block { background: #121212; border: 1px solid rgba(201,169,97,.18); border-radius: 14px; padding: 20px; }
         .block h2 { font-family: "Cinzel", serif; color: #fff; font-size: 17px; margin: 0 0 16px; }

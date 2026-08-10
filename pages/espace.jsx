@@ -161,7 +161,7 @@ export default function Espace() {
     try {
       const r = await fetch(`${SB_URL}/auth/v1/otp`, {
         method: "POST", headers: { "content-type": "application/json", apikey: SB_KEY },
-        body: JSON.stringify({ email, create_user: false }),
+        body: JSON.stringify({ email, create_user: true }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -200,7 +200,7 @@ export default function Espace() {
     try {
       const r = await fetch(`${SB_URL}/auth/v1/otp`, {
         method: "POST", headers: { "content-type": "application/json", apikey: SB_KEY },
-        body: JSON.stringify({ email: pendingEmail, create_user: false }),
+        body: JSON.stringify({ email: pendingEmail, create_user: true }),
       });
       if (r.ok) setInfo("Nouveau code envoyé.");
       else setErr(r.status === 429 ? "Trop de demandes. Patientez une minute." : "Envoi impossible.");
