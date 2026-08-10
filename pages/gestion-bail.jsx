@@ -328,11 +328,13 @@ export default function GestionBail() {
       const docId = Array.isArray(drow) && drow[0] ? drow[0].id : null;
       if (!docId) throw new Error("Document cree mais identifiant introuvable.");
 
-      // 3) INSERT document_links (un lien par locataire ; sinon un lien bail/bien)
+      // 3) INSERT document_links : UNE cible par ligne (contrainte une_cible_unique).
+      // Une ligne par contact (locataire/caution), plus une ligne bail et une ligne bien.
       const allIds = [...new Set([...locIds, ...cautIds])];
-      const links = allIds.length
-        ? allIds.map((cid) => ({ document_id: docId, contact_id: cid, bail_id: bail.id, bien_id: bail.bien_id }))
-        : [{ document_id: docId, bail_id: bail.id, bien_id: bail.bien_id }];
+      const links = [];
+      allIds.forEach((cid) => links.push({ document_id: docId, contact_id: cid }));
+      links.push({ document_id: docId, bail_id: bail.id });
+      if (bail.bien_id) links.push({ document_id: docId, bien_id: bail.bien_id });
       try {
         await api("document_links", session, { method: "POST", prefer: "return=minimal", body: links });
       } catch (le) {
