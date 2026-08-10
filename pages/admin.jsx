@@ -334,7 +334,7 @@ export default function Admin() {
       const dres = await fetch(`${SB_URL}/rest/v1/documents`, {
         method: "POST",
         headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: "return=representation" },
-        body: JSON.stringify({ type, storage_path: path, mime_type: file.type || null, taille_octets: file.size, visibility: audience }),
+        body: JSON.stringify({ type, storage_path: path, mime_type: file.type || null, taille_octets: file.size, visibility: audience, signature_statut: (f.signe && f.signe.checked) ? "en_cours" : "aucune" }),
       });
       const doc = (await dres.json())[0];
       const links = [];
@@ -584,6 +584,7 @@ export default function Admin() {
                 <label className="upfile">Fichier
                   <input name="file" type="file" required />
                 </label>
+                <label className="upsigne"><input type="checkbox" name="signe" /> Requiert une signature du destinataire (le client signera depuis son espace)</label>
                 {upMsg && <div className="upmsg">{upMsg}</div>}
                 <button type="submit" disabled={upBusy}>{upBusy ? "Dépôt en cours…" : "Déposer le document"}</button>
                 <p className="uphint">Le document ne sera visible que dans l'espace du destinataire choisi, en téléchargement sécurisé et journalisé.</p>
@@ -680,6 +681,8 @@ export default function Admin() {
         .upform button { background: linear-gradient(180deg,#d8bd7e,#c9a961); color: #0d0d0d; border: none; border-radius: 9px; padding: 12px 18px; font-weight: 700; font-family: inherit; cursor: pointer; }
         .upform button:disabled { opacity: .6; }
         .upmsg { color: #c9a961; font-size: 14px; margin-bottom: 12px; }
+        .upsigne { flex-direction: row !important; align-items: center; gap: 9px; color: #d8d0bf !important; font-size: 13.5px !important; }
+        .upsigne input { width: 17px; height: 17px; accent-color: #c9a961; }
         .uphint { color: #8f8674; font-size: 12.5px; margin: 12px 0 0; }
         .inc-admin, .msg-admin { margin-top: 34px; border-top: 1px solid rgba(201,169,97,.14); padding-top: 20px; }
         .a-empty { color: #8f8674; font-size: 14px; }

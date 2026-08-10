@@ -61,6 +61,7 @@ export default function Espace() {
   const [contactId, setContactId] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [signMsg, setSignMsg] = useState("");
 
   const validToken = useCallback(async (s) => {
     if (!s) return null;
@@ -121,7 +122,7 @@ export default function Espace() {
       setBailLoc((Array.isArray(bp) ? bp : []).map((x) => x.baux).filter(Boolean));
     }
     try {
-      const d = await rest(`documents?select=id,type,created_at,expires_at,visibility,storage_path&order=created_at.desc&limit=100`, s);
+      const d = await rest(`documents?select=id,type,created_at,expires_at,visibility,storage_path,signature_statut&order=created_at.desc&limit=100`, s);
       setDocs(Array.isArray(d) ? d : []);
     } catch {}
     try {
@@ -284,6 +285,18 @@ export default function Espace() {
     } catch { setErr("Envoi du message impossible."); }
   }
 
+  async function signDoc(doc, name) {
+    setErr(""); setSignMsg("");
+    try {
+      const token = await validToken(session);
+      const r = await fetch("/api/sign", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ access_token: token, document_id: doc.id, name, consent: true }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) { setErr(j.error === "deja_signe" ? "Ce document est déjà signé." : "La signature a échoué. Réessayez."); return; }
+      setSignMsg("Signature enregistrée ✓ — vous allez recevoir le document par email.");
+      await loadData(session, roles.bailleur, roles.locataire);
+    } catch { setErr("Signature impossible. Réessayez."); }
+  }
+
   const nomLoc = (parties) => {
     const loc = (parties || []).find((p) => p.role === "locataire") || (parties || [])[0];
     const c = loc && loc.contacts;
@@ -348,6 +361,16 @@ export default function Espace() {
             </header>
 
             {err && <div className="banner-err">{err}</div>}
+
+            {docs.some((d) => d.signature_statut === "en_cours") && (
+              <section className="tosign">
+                <h2 className="ts-h">Documents à signer</h2>
+                {docs.filter((d) => d.signature_statut === "en_cours").map((d) => (
+                  <SignRow key={d.id} doc={d} onView={download} onSign={signDoc} />
+                ))}
+                {signMsg && <div className="ts-msg">{signMsg}</div>}
+              </section>
+            )}
 
             {roles.bailleur && roles.locataire && (
               <div className="tabs">
@@ -538,6 +561,9 @@ export default function Espace() {
         .bubble.me { align-self: flex-end; background: #0d0d0d; color: #f3efe6; }
         .bubble.them { align-self: flex-start; background: #fffdf8; border: 1px solid #e6ddca; color: #2a2620; }
         .bmeta { font-size: 11px; opacity: .7; margin-top: 4px; }
+        .tosign { background: #fbf7ee; border: 1px solid #e6ddca; border-radius: 14px; padding: 20px 22px; margin-bottom: 24px; }
+        .ts-h { font-family: "Cinzel", serif; font-size: 18px; color: #0d0d0d; margin: 0 0 14px; border-left: 3px solid #a9853f; padding-left: 12px; }
+        .ts-msg { color: #3d6b34; background: #e7f0e4; border: 1px solid #b9d6b0; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 8px; }
         .foot { text-align: center; color: #a49a82; font-size: 12.5px; margin-top: 40px; }
         @media (max-width: 560px) { .panel h1 { font-size: 22px; } }
       `}</style>
@@ -569,6 +595,52 @@ function DocsList({ docs, vide, audience, onDownload }) {
         .ddate { color: #8a8069; font-size: 13px; }
         .ddl { background: #0d0d0d; color: #c9a961; border: none; border-radius: 7px; padding: 8px 14px; font-family: inherit; font-size: 13px; cursor: pointer; }
         .ddl:hover { filter: brightness(1.15); }
+      `}</style>
+    </div>
+  );
+}
+
+function SignRow({ doc, onView, onSign }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const TYPES = { bail: "Bail", quittance: "Quittance de loyer", releve: "Relevé de gérance", avis: "Avis", diagnostic: "Diagnostic", etat_des_lieux: "État des lieux", mandat: "Mandat", autre: "Document" };
+  async function submit(e) {
+    e.preventDefault();
+    const f = e.currentTarget;
+    if (!f.consent.checked) return;
+    setBusy(true);
+    await onSign(doc, (f.signname.value || "").trim());
+    setBusy(false);
+  }
+  return (
+    <div className="tsrow">
+      <div className="tshead">
+        <span className="tstype">{TYPES[doc.type] || doc.type}</span>
+        <div className="tsbtns">
+          <button type="button" className="tsview" onClick={() => onView(doc)}>Lire</button>
+          {!open && <button type="button" className="tssign" onClick={() => setOpen(true)}>Signer</button>}
+        </div>
+      </div>
+      {open && (
+        <form className="tsform" onSubmit={submit}>
+          <input name="signname" placeholder="Vos nom et prénom" required />
+          <label className="tsconsent"><input type="checkbox" name="consent" required /> J'ai lu le document et je l'accepte sans réserve. Je signe électroniquement, ce qui vaut engagement.</label>
+          <button type="submit" disabled={busy}>{busy ? "Signature en cours…" : "Je signe"}</button>
+        </form>
+      )}
+      <style jsx>{`
+        .tsrow { background: #fffdf8; border: 1px solid #e6ddca; border-left: 3px solid #a9853f; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
+        .tshead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .tstype { font-family: "Cinzel", serif; font-size: 15px; color: #0d0d0d; }
+        .tsbtns { display: flex; gap: 8px; }
+        .tsview { background: transparent; border: 1px solid #d9cfb6; color: #a9853f; border-radius: 7px; padding: 7px 13px; font-family: inherit; font-size: 13px; cursor: pointer; }
+        .tssign { background: #0d0d0d; color: #c9a961; border: none; border-radius: 7px; padding: 7px 16px; font-family: inherit; font-size: 13px; cursor: pointer; }
+        .tsform { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; border-top: 1px solid #efe7d4; padding-top: 12px; }
+        .tsform input { background: #fff; border: 1px solid #d9cfb6; border-radius: 8px; padding: 10px 12px; font-family: inherit; font-size: 15px; color: #2a2620; max-width: 320px; }
+        .tsconsent { flex-direction: row; display: flex; gap: 9px; align-items: flex-start; font-size: 13.5px; color: #5a5344; line-height: 1.5; max-width: none; }
+        .tsconsent input { margin-top: 3px; width: 17px; height: 17px; accent-color: #a9853f; max-width: none; }
+        .tsform > button { background: linear-gradient(180deg,#c9a961,#a9853f); color: #221c0c; border: none; border-radius: 9px; padding: 12px 22px; font-weight: 700; font-family: inherit; cursor: pointer; align-self: flex-start; }
+        .tsform > button:disabled { opacity: .6; }
       `}</style>
     </div>
   );
