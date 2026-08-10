@@ -38,7 +38,7 @@ export default function Header() {
             <a href="#faq">FAQ</a>
             <a href="#contact">Contact</a>
           </nav>
-          <a className="nav-space" href="#">Espace client</a>
+          <a className="nav-space" href="/espace">Espace client</a>
           <a className="cta-nav" href="#estimer">Estimer mon loyer</a>
           <span className="burger" onClick={() => setOpen(!open)}>&#9776;</span>
         </div>
@@ -52,8 +52,8 @@ export default function Header() {
       </div>
       <div className="client-bar">
         <span className="cb-label">Vos espaces sécurisés</span>
-        <a className="ca" href="#"><House /><span>Espace propriétaire</span></a>
-        <a className="ca" href="#"><Key /><span>Espace locataire</span></a>
+        <a className="ca" href="/espace"><House /><span>Espace propriétaire</span></a>
+        <a className="ca" href="/espace"><Key /><span>Espace locataire</span></a>
       </div>
     </>
   );
