@@ -287,6 +287,8 @@ export default function GestionBail() {
     if (!bail) { setSendMsg("Choisis d'abord un bail."); return; }
     const parts = Array.isArray(bail.bail_parties) ? bail.bail_parties : [];
     const locIds = parts.filter((p) => ["locataire", "co_titulaire"].includes(p.role) && p.contact_id).map((p) => p.contact_id);
+    const cautIds = parts.filter((p) => ["garant", "caution"].includes(p.role) && p.contact_id).map((p) => p.contact_id);
+    const payload = buildData();
     const doc = makeDoc(); if (!doc) return;
     setBusy(true);
     try {
@@ -309,6 +311,15 @@ export default function GestionBail() {
         throw new Error("Upload refuse (" + up.status + "). " + (t || "Verifier les droits du bucket documents.") + " Aucune donnee n'a ete ecrite.");
       }
 
+      // 1bis) UPLOAD du payload (permet la regeneration signee a la finalisation)
+      try {
+        await fetch(`${SB_URL}/storage/v1/object/documents/${path.replace(/\.pdf$/, ".json")}`, {
+          method: "POST",
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json", "x-upsert": "false" },
+          body: JSON.stringify({ ...payload, _bailId: bail.id, _bienId: bail.bien_id, _locName: payload.locataire || "" }),
+        });
+      } catch {}
+
       // 2) INSERT documents (seulement apres upload OK)
       const drow = await api("documents", session, { method: "POST", prefer: "return=representation", body: {
         type: "bail", storage_path: path, file_hash: hash, mime_type: "application/pdf",
@@ -318,8 +329,9 @@ export default function GestionBail() {
       if (!docId) throw new Error("Document cree mais identifiant introuvable.");
 
       // 3) INSERT document_links (un lien par locataire ; sinon un lien bail/bien)
-      const links = locIds.length
-        ? locIds.map((cid) => ({ document_id: docId, contact_id: cid, bail_id: bail.id, bien_id: bail.bien_id }))
+      const allIds = [...new Set([...locIds, ...cautIds])];
+      const links = allIds.length
+        ? allIds.map((cid) => ({ document_id: docId, contact_id: cid, bail_id: bail.id, bien_id: bail.bien_id }))
         : [{ document_id: docId, bail_id: bail.id, bien_id: bail.bien_id }];
       try {
         await api("document_links", session, { method: "POST", prefer: "return=minimal", body: links });
