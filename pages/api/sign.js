@@ -120,13 +120,18 @@ export default async function handler(req, res) {
       if (!dr.rows.length) return res.status(403).json({ ok: false, error: "document_non_autorise" });
       doc = dr.rows[0];
       if (doc.signature_statut === "signe") return res.status(409).json({ ok: false, error: "deja_signe" });
+      // multi-signataires (bail) : un meme contact ne signe qu'une fois
+      const already = await client.query(`select 1 from signatures where document_id = $1 and contact_id = $2 limit 1`, [doc.id, signer.contact_id]);
+      if (already.rows.length) return res.status(409).json({ ok: false, error: "deja_signe" });
 
       const consentText = `Je soussigné(e) ${name || nomOf(signer)} reconnais avoir pris connaissance du document et l'accepter sans réserve. Signature électronique le ${dateStr}.`;
       await client.query(
         `insert into signatures (document_id, contact_id, signed_by_name, consent_text, ip, user_agent)
          values ($1, $2, $3, $4, $5, $6)`,
         [doc.id, signer.contact_id, name || nomOf(signer), consentText, ip, ua]);
-      await client.query(`update documents set signature_statut = 'signe' where id = $1`, [doc.id]);
+      if (doc.type !== "bail") {
+        await client.query(`update documents set signature_statut = 'signe' where id = $1`, [doc.id]);
+      }
       doc._consentText = consentText;
     } finally { client.release(); }
   } catch (e) {
