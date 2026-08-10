@@ -78,15 +78,20 @@ export default async function handler(req, res) {
   if (!token || !documentId) return res.status(400).json({ ok: false, error: "params" });
   if (!consent) return res.status(400).json({ ok: false, error: "consentement_requis" });
 
-  // 1) identite
-  let authId, authEmail;
-  try {
-    const u = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${token}` } });
-    if (!u.ok) return res.status(401).json({ ok: false, error: "non_authentifie" });
-    const uj = await u.json();
-    authId = uj.id; authEmail = uj.email;
-  } catch { return res.status(401).json({ ok: false, error: "non_authentifie" }); }
+  // 1) identite : on lit le sujet du jeton, puis on valide sa signature via
+  // PostgREST (qui rejette tout jeton non signe / expire avec un 401).
+  function decodeJwt(tk) {
+    try { return JSON.parse(Buffer.from((tk.split(".")[1] || "").replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8")); }
+    catch { return {}; }
+  }
+  const claims = decodeJwt(token);
+  const authId = claims.sub;
+  const authEmail = claims.email;
   if (!authId) return res.status(401).json({ ok: false, error: "non_authentifie" });
+  try {
+    const chk = await fetch(`${SB_URL}/rest/v1/contacts?select=id&limit=1`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${token}` } });
+    if (chk.status === 401 || chk.status === 403) return res.status(401).json({ ok: false, error: "non_authentifie" });
+  } catch { return res.status(401).json({ ok: false, error: "non_authentifie" }); }
 
   const ip = (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim() || null;
   const ua = (req.headers["user-agent"] || "").toString().slice(0, 300) || null;
