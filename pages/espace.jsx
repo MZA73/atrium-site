@@ -62,6 +62,7 @@ export default function Espace() {
   const [incidents, setIncidents] = useState([]);
   const [messages, setMessages] = useState([]);
   const [signMsg, setSignMsg] = useState("");
+  const [mySigned, setMySigned] = useState(() => new Set());
 
   const validToken = useCallback(async (s) => {
     if (!s) return null;
@@ -124,6 +125,10 @@ export default function Espace() {
     try {
       const d = await rest(`documents?select=id,type,created_at,expires_at,visibility,storage_path,signature_statut&order=created_at.desc&limit=100`, s);
       setDocs(Array.isArray(d) ? d : []);
+    } catch {}
+    try {
+      const ms = await rest(`signatures?select=document_id`, s);
+      setMySigned(new Set((Array.isArray(ms) ? ms : []).map((x) => x.document_id)));
     } catch {}
     try {
       const inc = await rest(`incidents?select=id,sujet,description,statut,created_at&order=created_at.desc&limit=50`, s);
@@ -362,10 +367,10 @@ export default function Espace() {
 
             {err && <div className="banner-err">{err}</div>}
 
-            {docs.some((d) => d.signature_statut === "en_cours") && (
+            {docs.some((d) => d.signature_statut === "en_cours" && !mySigned.has(d.id)) && (
               <section className="tosign">
                 <h2 className="ts-h">Documents à signer</h2>
-                {docs.filter((d) => d.signature_statut === "en_cours").map((d) => (
+                {docs.filter((d) => d.signature_statut === "en_cours" && !mySigned.has(d.id)).map((d) => (
                   <SignRow key={d.id} doc={d} onView={download} onSign={signDoc} />
                 ))}
                 {signMsg && <div className="ts-msg">{signMsg}</div>}
