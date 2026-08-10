@@ -330,11 +330,13 @@ export default function GestionBail() {
 
       // 3) INSERT document_links : UNE cible par ligne (contrainte une_cible_unique).
       // Une ligne par contact (locataire/caution), plus une ligne bail et une ligne bien.
+      // Cles identiques sur toutes les lignes (PostgREST : "All object keys must match"),
+      // une seule cible non-nulle par ligne (contrainte une_cible_unique).
       const allIds = [...new Set([...locIds, ...cautIds])];
       const links = [];
-      allIds.forEach((cid) => links.push({ document_id: docId, contact_id: cid }));
-      links.push({ document_id: docId, bail_id: bail.id });
-      if (bail.bien_id) links.push({ document_id: docId, bien_id: bail.bien_id });
+      allIds.forEach((cid) => links.push({ document_id: docId, contact_id: cid, bail_id: null, bien_id: null }));
+      links.push({ document_id: docId, contact_id: null, bail_id: bail.id, bien_id: null });
+      if (bail.bien_id) links.push({ document_id: docId, contact_id: null, bail_id: null, bien_id: bail.bien_id });
       try {
         await api("document_links", session, { method: "POST", prefer: "return=minimal", body: links });
       } catch (le) {
