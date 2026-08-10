@@ -61,6 +61,10 @@ export default function Admin() {
   const [kpis, setKpis] = useState(null);
   const [prospects, setProspects] = useState([]);
   const [appUserId, setAppUserId] = useState(null);
+  const [biensList, setBiensList] = useState([]);
+  const [bauxList, setBauxList] = useState([]);
+  const [upMsg, setUpMsg] = useState("");
+  const [upBusy, setUpBusy] = useState(false);
 
   const validToken = useCallback(async (s) => {
     if (!s) return null;
@@ -142,6 +146,15 @@ export default function Admin() {
       `prospect_profiles?select=contact_id,statut,interet,ville_bien,score,created_at,contacts(nom,prenom,raison_sociale,email,telephone)&order=created_at.desc&limit=300`, s
     );
     setProspects(Array.isArray(list) ? list : []);
+
+    try {
+      const [bl, bxl] = await Promise.all([
+        rest(`biens?select=id,adresse&order=adresse`, s),
+        rest(`baux?select=id,bien_id,biens(adresse)&order=created_at.desc`, s),
+      ]);
+      setBiensList(Array.isArray(bl) ? bl : []);
+      setBauxList(Array.isArray(bxl) ? bxl : []);
+    } catch {}
   }, [rest]);
 
   const proceed = useCallback(async (s) => {
@@ -280,6 +293,48 @@ export default function Admin() {
     }
   }
 
+  async function onUpload(e) {
+    e.preventDefault();
+    const f = e.currentTarget;
+    const file = f.file.files[0];
+    if (!file) return;
+    setUpBusy(true); setUpMsg("");
+    const audience = f.audience.value, type = f.type.value;
+    const bienId = f.bien.value || null, bailId = f.bail.value || null;
+    if (!bienId && !bailId) { setUpMsg("Rattachez le document à un bien ou un bail."); setUpBusy(false); return; }
+    try {
+      const token = await validToken(session);
+      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const rnd = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+      const path = `${rnd}/${safe}`;
+      const up = await fetch(`${SB_URL}/storage/v1/object/documents/${path}`, {
+        method: "POST",
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": file.type || "application/octet-stream", "x-upsert": "false" },
+        body: file,
+      });
+      if (!up.ok) throw new Error("upload");
+      const dres = await fetch(`${SB_URL}/rest/v1/documents`, {
+        method: "POST",
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: "return=representation" },
+        body: JSON.stringify({ type, storage_path: path, mime_type: file.type || null, taille_octets: file.size, visibility: audience }),
+      });
+      const doc = (await dres.json())[0];
+      const links = [];
+      if (bienId) links.push({ document_id: doc.id, bien_id: bienId });
+      if (bailId) links.push({ document_id: doc.id, bail_id: bailId });
+      if (links.length) {
+        await fetch(`${SB_URL}/rest/v1/document_links`, {
+          method: "POST",
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify(links),
+        });
+      }
+      setUpMsg("Document déposé ✓ — visible dans l'espace du destinataire.");
+      f.reset();
+    } catch { setUpMsg("Échec du dépôt. Réessayez."); }
+    setUpBusy(false);
+  }
+
   const nomContact = (c) => {
     if (!c) return "Contact";
     if (c.raison_sociale) return c.raison_sociale;
@@ -410,6 +465,52 @@ export default function Admin() {
               })}
             </section>
 
+            <section className="docs-admin">
+              <h2 className="docs-h">Coffre — déposer un document</h2>
+              <form className="upform" onSubmit={onUpload}>
+                <div className="uprow">
+                  <label>Destinataire
+                    <select name="audience" defaultValue="bailleur">
+                      <option value="bailleur">Propriétaire</option>
+                      <option value="locataire">Locataire</option>
+                    </select>
+                  </label>
+                  <label>Type
+                    <select name="type" defaultValue="quittance">
+                      <option value="quittance">Quittance de loyer</option>
+                      <option value="releve">Relevé de gérance</option>
+                      <option value="mandat">Mandat</option>
+                      <option value="bail">Bail</option>
+                      <option value="etat_des_lieux">État des lieux</option>
+                      <option value="diagnostic">Diagnostic</option>
+                      <option value="avis">Avis</option>
+                      <option value="autre">Autre</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="uprow">
+                  <label>Bien (optionnel)
+                    <select name="bien" defaultValue="">
+                      <option value="">—</option>
+                      {biensList.map((b) => <option key={b.id} value={b.id}>{b.adresse}</option>)}
+                    </select>
+                  </label>
+                  <label>Bail (optionnel)
+                    <select name="bail" defaultValue="">
+                      <option value="">—</option>
+                      {bauxList.map((bx) => <option key={bx.id} value={bx.id}>{bx.biens?.adresse || bx.id.slice(0, 8)}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <label className="upfile">Fichier
+                  <input name="file" type="file" required />
+                </label>
+                {upMsg && <div className="upmsg">{upMsg}</div>}
+                <button type="submit" disabled={upBusy}>{upBusy ? "Dépôt en cours…" : "Déposer le document"}</button>
+                <p className="uphint">Le document ne sera visible que dans l'espace du destinataire choisi, en téléchargement sécurisé et journalisé.</p>
+              </form>
+            </section>
+
             {lost.length > 0 && (
               <section className="lostzone">
                 <div className="losthead">Perdus <span>{lost.length}</span></div>
@@ -489,6 +590,17 @@ export default function Admin() {
         .losthead span { background: rgba(255,255,255,.06); border-radius: 20px; padding: 1px 9px; font-size: 12px; margin-left: 6px; }
         .lostcards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
         .lostcard { opacity: .72; }
+        .docs-admin { margin-top: 34px; border-top: 1px solid rgba(201,169,97,.14); padding-top: 20px; }
+        .docs-h { font-family: "Cinzel", serif; color: #fff; font-size: 18px; margin: 0 0 14px; }
+        .upform { background: #141414; border: 1px solid rgba(201,169,97,.22); border-radius: 12px; padding: 20px; max-width: 720px; }
+        .uprow { display: flex; gap: 14px; flex-wrap: wrap; }
+        .upform label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #cfc6b2; margin-bottom: 14px; flex: 1 1 240px; }
+        .upform select, .upform input { background: #0d0d0d; border: 1px solid rgba(201,169,97,.35); border-radius: 8px; padding: 10px 12px; color: #f3efe6; font-family: inherit; font-size: 14px; }
+        .upfile { flex-basis: 100%; }
+        .upform button { background: linear-gradient(180deg,#d8bd7e,#c9a961); color: #0d0d0d; border: none; border-radius: 9px; padding: 12px 18px; font-weight: 700; font-family: inherit; cursor: pointer; }
+        .upform button:disabled { opacity: .6; }
+        .upmsg { color: #c9a961; font-size: 14px; margin-bottom: 12px; }
+        .uphint { color: #8f8674; font-size: 12.5px; margin: 12px 0 0; }
         @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, 1fr); } .board, .lostcards { grid-template-columns: 1fr 1fr; } }
         @media (max-width: 560px) { .board, .lostcards { grid-template-columns: 1fr; } }
       `}</style>

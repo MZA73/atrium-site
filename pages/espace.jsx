@@ -35,6 +35,13 @@ function loadSession() {
 const saveSession = (s) => { if (typeof window !== "undefined") window.localStorage.setItem(STORE, JSON.stringify(s)); };
 const clearStore = () => { if (typeof window !== "undefined") window.localStorage.removeItem(STORE); };
 
+function decodeJwt(t) {
+  try {
+    const p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(decodeURIComponent(escape(atob(p))));
+  } catch { return {}; }
+}
+
 export default function Espace() {
   const [session, setSession] = useState(null);
   const [phase, setPhase] = useState("boot"); // boot|email|otp|denied|ready
@@ -49,6 +56,7 @@ export default function Espace() {
   const [bauxProp, setBauxProp] = useState([]);
   const [bailLoc, setBailLoc] = useState([]);
   const [docs, setDocs] = useState([]);
+  const [appUserId, setAppUserId] = useState(null);
 
   const validToken = useCallback(async (s) => {
     if (!s) return null;
@@ -107,7 +115,7 @@ export default function Espace() {
       setBailLoc((Array.isArray(bp) ? bp : []).map((x) => x.baux).filter(Boolean));
     }
     try {
-      const d = await rest(`documents?select=id,type,created_at,expires_at&order=created_at.desc&limit=100`, s);
+      const d = await rest(`documents?select=id,type,created_at,expires_at,visibility,storage_path&order=created_at.desc&limit=100`, s);
       setDocs(Array.isArray(d) ? d : []);
     } catch {}
   }, [rest]);
@@ -125,6 +133,13 @@ export default function Espace() {
     if (!isB && !isL) { setPhase("denied"); return; }
     setRoles({ bailleur: isB, locataire: isL });
     setTab(isB ? "proprietaire" : "locataire");
+    try {
+      const sub = decodeJwt(token).sub;
+      if (sub) {
+        const rows = await rest(`app_users?select=id&auth_user_id=eq.${sub}&limit=1`, s);
+        if (Array.isArray(rows) && rows[0]) setAppUserId(rows[0].id);
+      }
+    } catch {}
     try { await loadData(s, isB, isL); setPhase("ready"); }
     catch (e) {
       if (String(e.message).includes("session")) { clearStore(); setSession(null); setPhase("email"); }
@@ -200,6 +215,28 @@ export default function Espace() {
     } catch {}
     clearStore(); setSession(null); setPhase("email");
     setBiens([]); setMandats([]); setBauxProp([]); setBailLoc([]); setDocs([]);
+  }
+
+  async function download(doc) {
+    setErr("");
+    try {
+      const token = await validToken(session);
+      const r = await fetch(`${SB_URL}/storage/v1/object/sign/documents/${doc.storage_path}`, {
+        method: "POST",
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ expiresIn: 120 }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.signedURL) { setErr("Téléchargement indisponible pour ce document."); return; }
+      try {
+        await fetch(`${SB_URL}/rest/v1/document_access_log`, {
+          method: "POST",
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify({ document_id: doc.id, user_id: appUserId, action: "download" }),
+        });
+      } catch {}
+      window.open(`${SB_URL}/storage/v1${j.signedURL}`, "_blank", "noopener");
+    } catch { setErr("Téléchargement impossible. Réessayez."); }
   }
 
   const nomLoc = (parties) => {
@@ -320,7 +357,7 @@ export default function Espace() {
                 )}
 
                 <h2>Mes documents</h2>
-                <DocsList docs={docs} />
+                <DocsList docs={docs} audience="bailleur" onDownload={download} />
               </div>
             )}
 
@@ -346,7 +383,7 @@ export default function Espace() {
                   </div>
                 ))}
                 <h2>Mes quittances & documents</h2>
-                <DocsList docs={docs} vide="Vos quittances et documents apparaîtront ici." />
+                <DocsList docs={docs} audience="locataire" onDownload={download} vide="Vos quittances et documents apparaîtront ici." />
               </div>
             )}
 
@@ -412,20 +449,21 @@ export default function Espace() {
   );
 }
 
-function DocsList({ docs, vide }) {
-  const TYPES = { bail: "Bail", quittance: "Quittance de loyer", releve: "Relevé de gérance", avis: "Avis", diagnostic: "Diagnostic", etat_des_lieux: "État des lieux", mandat: "Mandat" };
-  if (!docs || docs.length === 0) {
+function DocsList({ docs, vide, audience, onDownload }) {
+  const TYPES = { bail: "Bail", quittance: "Quittance de loyer", releve: "Relevé de gérance", avis: "Avis", diagnostic: "Diagnostic", etat_des_lieux: "État des lieux", mandat: "Mandat", autre: "Document" };
+  const list = (docs || []).filter((d) => !audience || d.visibility === audience);
+  if (list.length === 0) {
     return <div className="empty">{vide || "Vos documents (mandat, quittances, relevés, états des lieux) apparaîtront ici dès qu'ils seront déposés par le cabinet."}
       <style jsx>{`.empty { color: #a49a82; background: #fbf9f2; border: 1px dashed #e0d6bf; border-radius: 10px; padding: 16px; font-size: 14px; }`}</style>
     </div>;
   }
   return (
     <div className="dlist">
-      {docs.map((d) => (
+      {list.map((d) => (
         <div className="drow" key={d.id}>
           <span className="dtype">{TYPES[d.type] || d.type}</span>
           <span className="ddate">{d.created_at ? new Date(d.created_at).toLocaleDateString("fr-FR") : ""}</span>
-          <span className="dsoon">Téléchargement à venir</span>
+          <button className="ddl" onClick={() => onDownload && onDownload(d)}>Télécharger</button>
         </div>
       ))}
       <style jsx>{`
@@ -433,7 +471,8 @@ function DocsList({ docs, vide }) {
         .drow { display: flex; align-items: center; gap: 14px; background: #fffdf8; border: 1px solid #e6ddca; border-radius: 9px; padding: 12px 16px; }
         .dtype { font-size: 15px; color: #0d0d0d; flex: 1; }
         .ddate { color: #8a8069; font-size: 13px; }
-        .dsoon { color: #a49a82; font-size: 12px; font-style: italic; }
+        .ddl { background: #0d0d0d; color: #c9a961; border: none; border-radius: 7px; padding: 8px 14px; font-family: inherit; font-size: 13px; cursor: pointer; }
+        .ddl:hover { filter: brightness(1.15); }
       `}</style>
     </div>
   );
