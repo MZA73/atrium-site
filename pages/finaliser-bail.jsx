@@ -235,6 +235,32 @@ export default function FinaliserBail() {
     setBusy(false);
   }
 
+  async function onDelete(doc) {
+    setErr(""); setMsg((m) => ({ ...m, [doc.id]: "" }));
+    const nom = doc.storage_path.split("/").slice(-1)[0];
+    if (!window.confirm("Supprimer definitivement le bail \"" + nom + "\" ? Cette action est irreversible.")) return;
+    setBusy(true);
+    try {
+      const Tk = await validTk(session);
+      if (!Tk) throw new Error("session_expiree");
+      // 1) supprimer les liaisons eventuelles (parties liees)
+      try { await api("document_links?document_id=eq." + doc.id, session, { method: "DELETE" }); } catch {}
+      // 2) supprimer les signatures eventuelles
+      try { await api("signatures?document_id=eq." + doc.id, session, { method: "DELETE" }); } catch {}
+      // 3) supprimer la ligne document
+      await api("documents?id=eq." + doc.id, session, { method: "DELETE" });
+      // 4) supprimer le fichier du storage (best-effort)
+      try {
+        await fetch(`${SB_URL}/storage/v1/object/documents/${doc.storage_path}`, {
+          method: "DELETE", headers: { apikey: SB_KEY, Authorization: `Bearer ${Tk}` },
+        });
+      } catch {}
+      setMsg((m) => ({ ...m, [doc.id]: "Bail supprime." }));
+      await loadDocs(session);
+    } catch (e) { setMsg((m) => ({ ...m, [doc.id]: "Echec suppression : " + (e.message || e) })); }
+    setBusy(false);
+  }
+
   // ---- RENDU ----
   const wrap = { maxWidth: 1080, margin: "0 auto", padding: "0 20px" };
   const label = { display: "block", fontSize: 11, letterSpacing: 0.4, color: "#7a6a44", marginBottom: 4, fontFamily: "Arial,sans-serif" };
@@ -309,6 +335,7 @@ export default function FinaliserBail() {
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => onPreview(doc)} style={btn("transparent", "#7a6a44")}>Aperçu signé</button>
                         <button onClick={() => onFinalize(doc)} disabled={busy || !libReady || !fontB64} style={btn(NOIR, OR)}>{busy ? "…" : "Apposer le cachet et finaliser"}</button>
+                        <button onClick={() => onDelete(doc)} disabled={busy} style={btn("transparent", "#8a2a2a")}>Supprimer</button>
                       </div>
                     </div>
                     <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
