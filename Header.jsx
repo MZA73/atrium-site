@@ -31,10 +31,11 @@ export default function Header() {
           </Link>
           <nav className="menu" style={menuStyle}>
             <Link href="/gestion-locative-douai">Gestion locative</Link>
+            <Link href="/gestion-locative">Le Douaisis</Link>
             <Link href="/investisseurs">Investisseurs</Link>
             <Link href="/conciergerie-sejour">Conciergerie</Link>
-            <a href="/#services">Services</a>
             <Link href="/changer-agence">Changer d&apos;agence</Link>
+            <Link href="/le-cabinet">Le cabinet</Link>
             <a href="#faq">FAQ</a>
             <a href="#contact">Contact</a>
           </nav>
