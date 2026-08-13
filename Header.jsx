@@ -33,6 +33,7 @@ export default function Header() {
             <Link href="/gestion-locative-douai">Gestion locative</Link>
             <Link href="/gestion-locative">Le Douaisis</Link>
             <Link href="/investisseurs">Investisseurs</Link>
+            <Link href="/simulateur">Simulateur</Link>
             <Link href="/conciergerie-sejour">Conciergerie</Link>
             <Link href="/changer-agence">Changer d&apos;agence</Link>
             <Link href="/le-cabinet">Le cabinet</Link>
