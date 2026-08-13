@@ -116,7 +116,7 @@ export default function FinaliserBail() {
       if (typeof window !== "undefined" && !window.ATRIUM_SIGN_PNG) {
         let blob = null;
         try {
-          const sr = await fetch(`${SB_URL}/storage/v1/object/sign/documents/assets/sign-mo.png`, {
+          const sr = await fetch(`${SB_URL}/storage/v1/object/sign/documents/sign-mo.png`, {
             method: "POST",
             headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json" },
             body: JSON.stringify({ expiresIn: 120 }),
