@@ -108,17 +108,34 @@ export default function FinaliserBail() {
     let admin; try { admin = await rpc("has_role", { r: "admin" }, s); } catch { setPhase("email"); return; }
     if (admin !== true) { setPhase("denied"); return; }
     // Signature du cabinet : chargee UNIQUEMENT apres verification du role admin
-    // (jamais sur une page publique). Corrige l'exposition de sign-mo.png.
+    // (jamais sur une page publique). Source PRIVEE = Supabase Storage (bucket
+    // documents, chemin assets/sign-mo.png) via URL signee et jeton admin.
+    // Repli TEMPORAIRE sur l'ancien /sign-mo.png tant que la copie privee n'est
+    // pas en place ; a retirer (avec le fichier public) une fois l'upload fait.
     try {
       if (typeof window !== "undefined" && !window.ATRIUM_SIGN_PNG) {
-        const rb = await fetch("/sign-mo.png");
-        const bl = await rb.blob();
-        window.ATRIUM_SIGN_PNG = await new Promise((res) => {
-          const fr = new FileReader();
-          fr.onload = () => res(fr.result);
-          fr.onerror = () => res(null);
-          fr.readAsDataURL(bl);
-        });
+        let blob = null;
+        try {
+          const sr = await fetch(`${SB_URL}/storage/v1/object/sign/documents/assets/sign-mo.png`, {
+            method: "POST",
+            headers: { apikey: SB_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json" },
+            body: JSON.stringify({ expiresIn: 120 }),
+          });
+          if (sr.ok) {
+            const sj = await sr.json();
+            const fr = await fetch(`${SB_URL}/storage/v1${sj.signedURL}`);
+            if (fr.ok) blob = await fr.blob();
+          }
+        } catch {}
+        if (!blob) { try { const rb = await fetch("/sign-mo.png"); if (rb.ok) blob = await rb.blob(); } catch {} }
+        if (blob) {
+          window.ATRIUM_SIGN_PNG = await new Promise((res) => {
+            const fr = new FileReader();
+            fr.onload = () => res(fr.result);
+            fr.onerror = () => res(null);
+            fr.readAsDataURL(blob);
+          });
+        }
       }
     } catch {}
     try { await loadDocs(s); setPhase("ready"); }
