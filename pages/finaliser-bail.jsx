@@ -107,6 +107,20 @@ export default function FinaliserBail() {
     if (!token) { clearStore(); setSession(null); setPhase("email"); return; }
     let admin; try { admin = await rpc("has_role", { r: "admin" }, s); } catch { setPhase("email"); return; }
     if (admin !== true) { setPhase("denied"); return; }
+    // Signature du cabinet : chargee UNIQUEMENT apres verification du role admin
+    // (jamais sur une page publique). Corrige l'exposition de sign-mo.png.
+    try {
+      if (typeof window !== "undefined" && !window.ATRIUM_SIGN_PNG) {
+        const rb = await fetch("/sign-mo.png");
+        const bl = await rb.blob();
+        window.ATRIUM_SIGN_PNG = await new Promise((res) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result);
+          fr.onerror = () => res(null);
+          fr.readAsDataURL(bl);
+        });
+      }
+    } catch {}
     try { await loadDocs(s); setPhase("ready"); }
     catch (e) { if (String(e.message).includes("session")) { clearStore(); setSession(null); setPhase("email"); } else { setErr("Erreur de chargement."); setPhase("ready"); } }
   }, [validToken, rpc, loadDocs]);

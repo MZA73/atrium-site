@@ -11,9 +11,11 @@ import "@fontsource/cormorant-garamond/500.css";
 import "@fontsource/cormorant-garamond/600.css";
 import "@fontsource/cormorant-garamond/500-italic.css";
 import "../globals.css";
-import { useEffect } from "react";
 
+// Note securite : la signature du cabinet (sign-mo.png) N'EST PLUS prechargee
+// ici. Elle ne doit jamais etre exposee sur les pages publiques. Elle est
+// chargee uniquement dans /finaliser-bail (page reservee a l'administrateur),
+// au moment ou l'on appose le cachet sur le bail signe.
 export default function App({ Component, pageProps }) {
-useEffect(() => { fetch("/sign-mo.png").then((r) => r.blob()).then((b) => { const fr = new FileReader(); fr.onload = () => { window.ATRIUM_SIGN_PNG = fr.result; }; fr.readAsDataURL(b); }).catch(() => {}); }, []);
   return <Component {...pageProps} />;
 }

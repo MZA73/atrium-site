@@ -47,7 +47,6 @@ export default function Verifier() {
                   <div style={rowS}><span style={kS}>Signataire</span><span style={{ color: INK }}>{d.signataire}</span></div>
                   <div style={rowS}><span style={kS}>Document</span><span style={{ color: INK }}>{d.type}</span></div>
                   <div style={rowS}><span style={kS}>Date et heure</span><span style={{ color: INK }}>{d.date}</span></div>
-                  <div style={rowS}><span style={kS}>Adresse IP</span><span style={{ color: INK }}>{d.ip}</span></div>
                   <div style={{ ...rowS, borderBottom: "none" }}><span style={kS}>Référence</span><span style={{ color: INK, fontFamily: "monospace" }}>{d.ref}</span></div>
                 </div>
                 <p style={{ fontSize: 12.5, color: GRAY, lineHeight: 1.6, marginTop: 16 }}>Signature électronique recueillie au sens du règlement (UE) n°910/2014 (eIDAS) et de l&apos;article 1367 du Code civil. Le consentement du signataire, son horodatage et l&apos;empreinte du document sont conservés par le cabinet comme éléments de preuve.</p>

@@ -148,17 +148,9 @@ async function notifier(lead) {
 }
 
 export default async function handler(req, res) {
+  // Sondage de disponibilite minimal (aucune divulgation de configuration).
   if (req.method === "GET") {
-    return res.status(200).json({
-      ok: true,
-      config: {
-        db: !!process.env.DATABASE_URL,
-        dbPassword: !!process.env.DB_PASSWORD,
-        brevoKey: !!process.env.BREVO_API_KEY,
-        sender: !!process.env.BREVO_SENDER_EMAIL,
-        notify: !!process.env.CONTACT_NOTIFY_TO,
-      },
-    });
+    return res.status(200).json({ ok: true });
   }
 
   if (req.method !== "POST") {
