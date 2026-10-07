@@ -19,8 +19,8 @@ export default function Header() {
       <a className="annonce" href="/#services">
         <span className="an-dot" />
         <span className="an-new">Nouveau</span>
-        <span className="an-txt">Vous gérez seul votre bien ? État des lieux dès 3 €/m², mise en location dès 8 €/m²</span>
-        <span className="an-txt-s">Services à la carte, dès 3 €/m²</span>
+        <span className="an-txt">Vous gérez seul votre bien ? État des lieux 3,03 €/m² TTC, mise en location 8,07 €/m² TTC</span>
+        <span className="an-txt-s">Services à la carte, barème TTC</span>
         <span className="an-cta">Découvrir →</span>
         <span className="an-shine" />
       </a>
@@ -34,6 +34,7 @@ export default function Header() {
             <Link href="/gestion-locative">Le Douaisis</Link>
             <Link href="/investisseurs">Investisseurs</Link>
             <Link href="/simulateur">Simulateur</Link>
+            <Link href="/honoraires">Honoraires</Link>
             <Link href="/conciergerie-sejour">Conciergerie</Link>
             <Link href="/changer-agence">Changer d&apos;agence</Link>
             <Link href="/le-cabinet">Le cabinet</Link>

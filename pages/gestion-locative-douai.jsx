@@ -16,7 +16,7 @@ const faqJsonLd = {
     {
       "@type": "Question",
       "name": "Quels frais restent à la charge du locataire ?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Uniquement la mise en location (dès 8 €/m² à Douai) et l'état des lieux (dès 3 €/m²), dans le respect des plafonds de la loi ALUR. La quittance de loyer est gratuite." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Uniquement la mise en location (8,07 €/m² TTC à Douai) et l'état des lieux d'entrée (3,03 €/m² TTC), plafonds de la loi ALUR en vigueur depuis le 1er janvier 2026, sans jamais excéder la part du bailleur. La quittance de loyer est gratuite." }
     },
     {
       "@type": "Question",
