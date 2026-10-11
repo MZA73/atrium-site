@@ -121,7 +121,7 @@ export default function ContactForm() {
             </button>
             <p className="c-alt">
               Ou directement : <a href="mailto:contact@templeimmo.com">contact@templeimmo.com</a> &nbsp;&middot;&nbsp;
-              <a href="tel:0327956114">03 27 95 61 14</a>
+              <a href="tel:0698442242">06 98 44 22 42</a>
             </p>
           </form>
         )}
